@@ -27,10 +27,14 @@ ConnectionContext* get_free_cell(const ArrayConnectionContext* connections) {
     return NULL;
 }
 
-void start_receiving(ConnectionContext* connection) {
+void reset_receiving_buffer(ConnectionContext* connection) {
     connection->free_receive_bytes_count = RECEIVE_BUFFER_LENGTH;
     connection->request_start_offset = 0;
     connection->request_current_offset = 0;
+}
+
+void start_receiving(ConnectionContext* connection) {
+    reset_receiving_buffer(connection);
     connection->state = RECEIVING;
 }
 
@@ -83,9 +87,10 @@ void read_into_inner_buffer(ConnectionContext* connection) {
 long parse_long(ConnectionContext* connection, Error** error) {
     *error = NULL;
 
-    long result = 0;
+    long number = 0;
     int start_offset = connection->request_start_offset;
     int current_offset = connection->request_start_offset;
+    bool is_negative = false;
 
     while (connection->receive_buffer[current_offset % RECEIVE_BUFFER_LENGTH] != '\n') {
         int length = current_offset - start_offset;
@@ -96,20 +101,30 @@ long parse_long(ConnectionContext* connection, Error** error) {
         }
 
         char current_char = connection->receive_buffer[current_offset % RECEIVE_BUFFER_LENGTH];
-        if (!isdigit(current_char)) {
-            *error = get_error_from_message("Request contains non digit chars");
+
+        if (current_char == '-' && !is_negative) {
+            is_negative = true;
+        }
+        else if (isdigit(current_char)) {
+            number = number * 10 + current_char - '0';
+        }
+        else {
+            *error = get_error_from_message("Request may contain digits and one minus");
             break;
         }
 
-        result = result * 10 + current_char - '0';
-
         current_offset++;
+    }
+
+    if (*error != NULL) {
+        reset_receiving_buffer(connection);
+        return -1;
     }
 
     connection->request_start_offset = (current_offset + 1) % RECEIVE_BUFFER_LENGTH;
     connection->free_receive_bytes_count += current_offset - start_offset + 1;
 
-    return result;
+    return is_negative ? -number : number;
 }
 
 void start_sending_response(ConnectionContext* connection, long response) {
