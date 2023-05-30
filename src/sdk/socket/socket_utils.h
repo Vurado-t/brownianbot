@@ -6,7 +6,7 @@
 
 int get_socket_factory(const char* socket_name, int backlog_length, Error** error);
 
-int connect_to_unix_socket(const char* socket_name, Error** error);
+int connect_to_socket(const char* socket_name, Error** error);
 
 void send_string(int socket_fd, const char* str, Error** error);
 

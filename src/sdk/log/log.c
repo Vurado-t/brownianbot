@@ -27,11 +27,9 @@ void log_fmt_msg(LogLevel level, const char* fmt, ...) {
     printf("\n");
 
     fflush(stdout);
-    fflush(stderr);
 }
 
 void log_error(const Error* error) {
-    fprintf(stderr, "[ERROR] [%li] [%d] %s\n", time(NULL), error->code, error->message);
+    printf("[ERROR] [%li] [%d] %s\n", time(NULL), error->code, error->message);
     fflush(stdout);
-    fflush(stderr);
 }

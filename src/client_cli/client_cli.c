@@ -5,6 +5,7 @@
 #include "../sdk/config/config.h"
 #include "../sdk/log/log.h"
 #include "../sdk/socket/socket_utils.h"
+#include "../sdk/file/file_utils.h"
 
 #define NS_IN_SECOND 1000000000
 
@@ -46,7 +47,7 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
     ClientStatistics* statistics = calloc(1, sizeof(ClientStatistics));
     statistics->summary_delay_ns = 0;
 
-    int socket_fd = connect_to_unix_socket(socket_name, error);
+    int socket_fd = connect_to_socket(socket_name, error);
     if (error != NULL) {
         free(statistics);
         return NULL;
@@ -95,11 +96,16 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "No config path or delay\n");
+        log_fmt_msg(ERROR, "No config path or delay\n");
         return 1;
     }
 
     char* config_path = argv[1];
+    if (!is_abs_path(config_path)) {
+        log_fmt_msg(ERROR, "Config path must be absolute");
+        return 1;
+    }
+
     long delay_ms = atoi(argv[2]); // NOLINT(cert-err34-c)
 
     log_fmt_msg(INFO, "Config path: %s", config_path);
