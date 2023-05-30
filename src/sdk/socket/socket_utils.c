@@ -4,23 +4,25 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/un.h>
+#include <stdio.h>
+#include <errno.h>
 #include "socket_utils.h"
 #include "../log/log.h"
 
-void init_socket_unix_address(const char* socket_name, struct sockaddr_un* unix_address) {
+void init_socket_unix_address(const char* socket_name, SocketUnixAddress* unix_address) {
     unix_address->sun_family = AF_UNIX;
     strncpy(unix_address->sun_path, socket_name, sizeof(unix_address->sun_path));
     unix_address->sun_path[sizeof(unix_address->sun_path) - 1] = '\0';
 }
 
-int get_socket_factory(const char* socket_name, int backlog_length, Error** error) {
+int get_async_socket_factory(const char* socket_name, int backlog_length, Error** error) {
     *error = NULL;
 
     unlink(socket_name);
 
     int fd = socket(PF_UNIX, SOCK_STREAM, 0);
     if (fd == -1) {
-        *error = get_error_from_errno("get_socket_factory socket creating");
+        *error = get_error_from_errno("get_async_socket_factory socket creating");
         return -1;
     }
 
@@ -29,19 +31,19 @@ int get_socket_factory(const char* socket_name, int backlog_length, Error** erro
 
     bool is_bind_ok = bind(fd, (struct sockaddr*)&addr, sizeof(addr)) >= 0;
     if (!is_bind_ok)
-        *error = get_error_from_errno("get_socket_factory bind");
+        *error = get_error_from_errno("get_async_socket_factory bind");
 
     bool is_non_block_ok = fcntl(fd, F_SETFL, (fcntl(fd, F_GETFL, 0) | O_NONBLOCK)) >= 0;
-    if (!is_non_block_ok)
-        *error = get_error_from_errno("get_socket_factory non block");
+    if (!is_non_block_ok && *error == NULL)
+        *error = get_error_from_errno("get_async_socket_factory non block");
 
     bool is_listen_ok = listen(fd, backlog_length) >= 0;
-    if (!is_listen_ok)
-        *error = get_error_from_errno("get_socket_factory listen");
+    if (!is_listen_ok && *error == NULL)
+        *error = get_error_from_errno("get_async_socket_factory listen");
 
     if (!is_bind_ok || !is_non_block_ok || !is_listen_ok) {
         if (close(fd) < 0)
-            *error = attach_error(get_error_from_errno("get_socket_factory close"), *error);
+            *error = attach_error(get_error_from_errno("get_async_socket_factory close"), *error);
 
         return -1;
     }
@@ -52,7 +54,7 @@ int get_socket_factory(const char* socket_name, int backlog_length, Error** erro
 int connect_to_socket(const char* socket_name, Error** error) {
     *error = NULL;
 
-    int fd = socket(PF_INET, SOCK_STREAM, 0);
+    int fd = socket(PF_UNIX, SOCK_STREAM, 0);
     if (fd == -1) {
         *error = get_error_from_errno("connect_to_socket socket creating");
         return -1;
@@ -61,10 +63,9 @@ int connect_to_socket(const char* socket_name, Error** error) {
     struct sockaddr_un addr;
     init_socket_unix_address(socket_name, &addr);
 
-    bool is_non_block_ok = fcntl(fd, F_SETFL, (fcntl(fd, F_GETFL, 0) | O_NONBLOCK)) >= 0;
     bool is_connect_ok = connect(fd, (struct sockaddr*)&addr, sizeof(addr)) >= 0;
 
-    if (!is_connect_ok || !is_non_block_ok) {
+    if (!is_connect_ok) {
         *error = get_error_from_errno("connect_to_socket socket config");
 
         if (close(fd) < 0)
@@ -77,16 +78,27 @@ int connect_to_socket(const char* socket_name, Error** error) {
 }
 
 void send_string(int socket_fd, const char* str, Error** error) {
+    *error = NULL;
+
     int length = (int)strlen(str);
     int sent_count = 0;
 
+    log_fmt_msg(INFO, "length: %d", length); // TODO: delete
+
     while (length - sent_count > 0) {
+        log_fmt_msg(INFO, "iter"); // TODO: delete
         int last_send_count = (int)send(socket_fd, str + sent_count, length - sent_count, 0);
+
+        log_fmt_msg(INFO, "last_send_count %d", last_send_count); // TODO: delete
         if (last_send_count == -1) {
             *error = get_error_from_errno("send_string");
             return;
         }
+
+        sent_count += last_send_count;
     }
+
+    log_fmt_msg(INFO, "send_string end"); // TODO: delete
 }
 
 /*
@@ -94,12 +106,14 @@ void send_string(int socket_fd, const char* str, Error** error) {
  * abc\n -> char_count = 4
  * */
 char* recv_line(int socket_fd, char* buffer, int char_count, Error** error) {
+    *error = NULL;
+
     int recv_count = 0;
 
     while (recv_count < char_count) {
         int last_recv_count = (int)recv(socket_fd, buffer + recv_count, 1, 0);
         if (last_recv_count == -1) {
-            *error = get_error_from_errno("send_string");
+            *error = get_error_from_errno("recv_line");
             return buffer;
         }
 

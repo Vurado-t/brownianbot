@@ -9,6 +9,7 @@ ServerState* server_state;
 
 void handle_signals(int signum) {
     switch (signum) {
+        // complete sigaction bind if you need to add signal handling
         case SIGINT:
             server_state->is_running = false;
             break;
@@ -23,7 +24,7 @@ void setup_signal_handling() {
     sigemptyset(&action.sa_mask);
     action.sa_flags = 0;
 
-    sigaction(SIGHUP, &action, NULL);
+    sigaction(SIGINT, &action, NULL);
 }
 
 int main(int argc, char** argv) {
@@ -51,7 +52,7 @@ int main(int argc, char** argv) {
     log_fmt_msg(INFO, "socket path: '%s'", socket_path);
 
     server_state = malloc(sizeof(ServerState));
-    init_server_state(server_state, socket_path, 100, &error);
+    init_server_state(server_state, socket_path, 250, &error);
     if (error != NULL) {
         log_error(error);
         return error->code;

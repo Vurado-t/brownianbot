@@ -22,6 +22,7 @@ typedef struct {
     char send_buffer[SEND_BUFFER_LENGTH];
     int sent_count;
     int response_length;
+    int free_receive_bytes_count;
     char receive_buffer[RECEIVE_BUFFER_LENGTH];
     int request_current_offset;
     int request_start_offset;

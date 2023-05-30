@@ -4,7 +4,11 @@
 
 #include "../error/error.h"
 
-int get_socket_factory(const char* socket_name, int backlog_length, Error** error);
+typedef struct sockaddr_un SocketUnixAddress;
+
+void init_socket_unix_address(const char* socket_name, SocketUnixAddress* unix_address);
+
+int get_async_socket_factory(const char* socket_name, int backlog_length, Error** error);
 
 int connect_to_socket(const char* socket_name, Error** error);
 

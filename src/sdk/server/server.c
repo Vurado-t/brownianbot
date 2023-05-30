@@ -16,8 +16,9 @@
  * */
 ConnectionContext* get_free_cell(const ArrayConnectionContext* connections) {
     int i = 0;
+
     for (; i < connections->length; i++) {
-        if (connections->items[i].socket_fd >= 0)
+        if (connections->items[i].state != DISABLED)
             continue;
 
         return &connections->items[i];
@@ -27,28 +28,32 @@ ConnectionContext* get_free_cell(const ArrayConnectionContext* connections) {
 }
 
 void start_receiving(ConnectionContext* connection) {
+    connection->free_receive_bytes_count = RECEIVE_BUFFER_LENGTH;
     connection->request_start_offset = 0;
     connection->request_current_offset = 0;
     connection->state = RECEIVING;
 }
 
-void try_accept_connection(ServerState* server_state) {
+int try_accept_connection(ServerState* server_state) {
     struct sockaddr_un addr;
     socklen_t socklen;
+
     int fd = accept(server_state->socket_factory_fd, (struct sockaddr*)&addr, &socklen);
     if (fd < 0) {
-        return;
+        return -1;
     }
 
     if (fcntl(fd, F_SETFL, (fcntl(fd, F_GETFL, 0) | O_NONBLOCK)) < 0) {
         close(fd);
-        return;
+        return -1;
     }
 
     ConnectionContext* connection = get_free_cell(&server_state->connections);
     connection->socket_fd = fd;
 
     start_receiving(connection);
+
+    return fd;
 }
 
 void disable_connection(ConnectionContext* connection, Error** error) {
@@ -63,43 +68,34 @@ void disable_connection(ConnectionContext* connection, Error** error) {
 }
 
 void read_into_inner_buffer(ConnectionContext* connection) {
-    int requested_count = connection->request_start_offset - connection->request_current_offset;
-    if (requested_count == 0)
-        return;
-
-    if (requested_count < 0) {
-        requested_count = RECEIVE_BUFFER_LENGTH - connection->request_current_offset;
-        if (requested_count == 0) {
-            connection->request_current_offset = 0;
-            return;
-        }
-    }
-
     int count = (int)recv(connection->socket_fd,
                           connection->receive_buffer + connection->request_current_offset,
-                          requested_count,
+                          connection->free_receive_bytes_count,
                           0);
 
     if (count <= 0)
         return;
 
-    connection->request_current_offset += count;
+    connection->request_current_offset = (connection->request_current_offset + count) % RECEIVE_BUFFER_LENGTH;
+    connection->free_receive_bytes_count -= count;
 }
 
 long parse_long(ConnectionContext* connection, Error** error) {
     *error = NULL;
 
     long result = 0;
-    int i = connection->request_start_offset;
-    int length = 0;
+    int start_offset = connection->request_start_offset;
+    int current_offset = connection->request_start_offset;
 
-    while (connection->receive_buffer[i % RECEIVE_BUFFER_LENGTH] != '\n') {
+    while (connection->receive_buffer[current_offset % RECEIVE_BUFFER_LENGTH] != '\n') {
+        int length = current_offset - start_offset;
+
         if (length > 10) {
             *error = get_error_from_message("Too long request, no line break");
             break;
         }
 
-        char current_char = connection->receive_buffer[i % RECEIVE_BUFFER_LENGTH];
+        char current_char = connection->receive_buffer[current_offset % RECEIVE_BUFFER_LENGTH];
         if (!isdigit(current_char)) {
             *error = get_error_from_message("Request contains non digit chars");
             break;
@@ -107,11 +103,11 @@ long parse_long(ConnectionContext* connection, Error** error) {
 
         result = result * 10 + current_char - '0';
 
-        length++;
-        i++;
+        current_offset++;
     }
 
-    connection->request_start_offset = (connection->request_start_offset + length) % RECEIVE_BUFFER_LENGTH;
+    connection->request_start_offset = (current_offset + 1) % RECEIVE_BUFFER_LENGTH;
+    connection->free_receive_bytes_count += current_offset - start_offset + 1;
 
     return result;
 }
@@ -128,6 +124,7 @@ bool try_read(ConnectionContext* connection) {
         return false;
 
     read_into_inner_buffer(connection);
+
     return true;
 }
 
@@ -144,22 +141,28 @@ void handle_sending(ConnectionContext* connection) {
     connection->sent_count += count;
 
     if (connection->sent_count == connection->response_length) {
-        log_fmt_msg(INFO, "Sent %s to %d", connection->send_buffer, connection->socket_fd);
+        log_fmt_msg(INFO, "Send completed for fd %d ", connection->socket_fd);
         start_receiving(connection);
     }
 }
 
 void handle_receiving(ServerState* server_state, ConnectionContext* connection, Error** error) {
+    *error = NULL;
+
     if (!try_read(connection))
         return;
 
     long request = parse_long(connection, error);
-    if (error != NULL)
+    if (*error != NULL)
         return;
 
-    server_state->counter += request;
+    log_fmt_msg(INFO, "Received %d from fd(%d)", request, connection->socket_fd);
 
-    start_sending_response(connection, request);
+    server_state->counter += request;
+    log_fmt_msg(INFO, "Updated server counter: %d", server_state->counter);
+
+    start_sending_response(connection, server_state->counter);
+    log_fmt_msg(INFO, "Started sending %d to fd %d", server_state->counter, connection->socket_fd);
 }
 
 void handle_poll_events(ServerState* server_state) {
@@ -167,6 +170,9 @@ void handle_poll_events(ServerState* server_state) {
 
     for (int i = 0; i < server_state->connections.length; i++) {
         ConnectionContext* connection = &server_state->connections.items[i];
+
+        if (connection->state == DISABLED)
+            continue;
 
         if (connection->poll_revents & POLLERR) {
             log_fmt_msg(ERROR, "Socket error fd: '%d'", connection->socket_fd);
@@ -180,7 +186,7 @@ void handle_poll_events(ServerState* server_state) {
         }
 
         if (connection->poll_revents & POLLHUP) {
-            log_fmt_msg(INFO, "Disconnected fd: '%d'", connection->socket_fd);
+            log_fmt_msg(INFO, "Disconnected fd '%d'", connection->socket_fd);
             disable_connection(connection, &error);
             if (error != NULL) {
                 log_error(error);
@@ -207,7 +213,7 @@ void handle_poll_events(ServerState* server_state) {
 
         log_fmt_msg(
                 ERROR,
-                "[handle_poll_events] poll_revents: '%d' fd: '%d'",
+                "handle_poll_events poll_revents: '%d' fd: '%d'",
                 connection->poll_revents,
                 connection->socket_fd);
     }
@@ -237,7 +243,7 @@ void init_server_state(
     server_state->counter = 0;
     server_state->is_running = true;
 
-    server_state->socket_factory_fd = get_socket_factory(socket_file_name, backlog_length, error);
+    server_state->socket_factory_fd = get_async_socket_factory(socket_file_name, backlog_length, error);
     if (*error != NULL)
         return;
 
@@ -254,11 +260,13 @@ void run(ServerState* server_state) {
     poll_fds.items = calloc(poll_fds.length, sizeof(PollFd));
 
     while (server_state->is_running) {
-        try_accept_connection(server_state);
+        int client_fd = try_accept_connection(server_state);
+        if (client_fd >= 0)
+            log_fmt_msg(INFO, "Accepted connection %d", client_fd);
 
         map_to_poll_fds(&server_state->connections, &poll_fds);
 
-        int ready_count = poll(poll_fds.items, poll_fds.length, 100);
+        int ready_count = poll(poll_fds.items, poll_fds.length, 1000);
         if (ready_count < 0) {
             Error* error = get_error_from_errno("poll error");
             log_error(error);
@@ -269,6 +277,8 @@ void run(ServerState* server_state) {
 
         handle_poll_events(server_state);
     }
+
+    log_fmt_msg(INFO, "Server was stopped");
 
     free(poll_fds.items);
 }

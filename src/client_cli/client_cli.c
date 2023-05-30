@@ -2,6 +2,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <string.h>
 #include "../sdk/config/config.h"
 #include "../sdk/log/log.h"
 #include "../sdk/socket/socket_utils.h"
@@ -29,12 +30,13 @@ long send_request(int socket_fd, long request, Error** error) {
 
     send_string(socket_fd, str, error);
     if (*error != NULL)
-        return 0;
+        return -1;
+    log_fmt_msg(INFO, "after send_string"); // TODO: delete
 
     char recv_str[32];
     char* response = recv_line(socket_fd, recv_str, 32, error);
     if (*error != NULL)
-        return 0;
+        return -1;
 
     long response_number = atoi(response); // NOLINT(cert-err34-c)
 
@@ -48,7 +50,8 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
     statistics->summary_delay_ns = 0;
 
     int socket_fd = connect_to_socket(socket_name, error);
-    if (error != NULL) {
+
+    if (*error != NULL) {
         free(statistics);
         return NULL;
     }
