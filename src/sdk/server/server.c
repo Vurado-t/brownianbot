@@ -1,43 +1,15 @@
 #include <malloc.h>
 #include <poll.h>
 #include <unistd.h>
-#include <bits/socket.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <sys/un.h>
 #include "server.h"
 #include "../log/log.h"
+#include "../socket/socket_utils.h"
 #include <stdlib.h>
 #include <ctype.h>
-
-int get_socket_factory(const char* file_name, int backlog_length, Error** error) {
-    int fd = socket(PF_INET, SOCK_STREAM, 0);
-    if (fd == -1) {
-        *error = get_error_from_errno("get_socket_factory");
-        return -1;
-    }
-
-    struct sockaddr_un addr;
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, file_name, sizeof(addr.sun_path));
-    addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
-
-    bool is_bind_ok = bind(fd, (struct sockaddr*)&addr, sizeof(addr)) >= 0;
-    bool is_non_block_ok = fcntl(fd, F_SETFL, (fcntl(fd, F_GETFL, 0) | O_NONBLOCK)) >= 0;
-    bool is_listen_ok = listen(fd, backlog_length) >= 0;
-
-    if (!is_bind_ok || !is_non_block_ok || !is_listen_ok) {
-        *error = get_error_from_errno("get_socket_factory");
-
-        if (close(fd) < 0)
-            *error = attach_error(get_error_from_errno("get_socket_factory close"), *error);
-
-        return -1;
-    }
-
-    return fd;
-}
 
 /*
  * Returns connections->length if there is no inactive connections
@@ -297,4 +269,6 @@ void run(ServerState* server_state) {
 
         handle_poll_events(server_state);
     }
+
+    free(poll_fds.items);
 }
