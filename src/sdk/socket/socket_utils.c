@@ -4,8 +4,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/un.h>
-#include <stdio.h>
-#include <errno.h>
 #include "socket_utils.h"
 #include "../log/log.h"
 
@@ -83,13 +81,9 @@ void send_string(int socket_fd, const char* str, Error** error) {
     int length = (int)strlen(str);
     int sent_count = 0;
 
-    log_fmt_msg(INFO, "length: %d", length); // TODO: delete
-
     while (length - sent_count > 0) {
-        log_fmt_msg(INFO, "iter"); // TODO: delete
         int last_send_count = (int)send(socket_fd, str + sent_count, length - sent_count, 0);
 
-        log_fmt_msg(INFO, "last_send_count %d", last_send_count); // TODO: delete
         if (last_send_count == -1) {
             *error = get_error_from_errno("send_string");
             return;
@@ -97,30 +91,30 @@ void send_string(int socket_fd, const char* str, Error** error) {
 
         sent_count += last_send_count;
     }
-
-    log_fmt_msg(INFO, "send_string end"); // TODO: delete
 }
 
-/*
- * buffer length is (char_count + 1)
- * abc\n -> char_count = 4
- * */
-char* recv_line(int socket_fd, char* buffer, int char_count, Error** error) {
+char* recv_line(int socket_fd, char* buffer, int buffer_length, Error** error) {
     *error = NULL;
 
     int recv_count = 0;
-
-    while (recv_count < char_count) {
+    while (recv_count < buffer_length - 1) {
         int last_recv_count = (int)recv(socket_fd, buffer + recv_count, 1, 0);
         if (last_recv_count == -1) {
             *error = get_error_from_errno("recv_line");
-            return buffer;
+            return NULL;
         }
 
-        recv_count++;
+        recv_count += last_recv_count;
+        if (buffer[recv_count - 1] == '\n')
+            break;
     }
 
-    buffer[char_count] = '\0';
+    if (buffer[recv_count - 1] != '\n') {
+        *error = get_error_from_message("Too small buffer");
+        return NULL;
+    }
+
+    buffer[recv_count - 1] = '\0';
 
     return buffer;
 }

@@ -31,7 +31,6 @@ long send_request(int socket_fd, long request, Error** error) {
     send_string(socket_fd, str, error);
     if (*error != NULL)
         return -1;
-    log_fmt_msg(INFO, "after send_string"); // TODO: delete
 
     char recv_str[32];
     char* response = recv_line(socket_fd, recv_str, 32, error);
@@ -50,6 +49,7 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
     statistics->summary_delay_ns = 0;
 
     int socket_fd = connect_to_socket(socket_name, error);
+    log_fmt_msg(INFO, "Connected");
 
     if (*error != NULL) {
         free(statistics);
@@ -60,6 +60,7 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
     long number = 0;
     char c;
     bool is_whitespace_sequence = false;
+    bool is_negative = false;
 
     while ((c = (char)getc(stdin)) != EOF) {
         file_offset++;
@@ -69,6 +70,9 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
         if (c == '\n') {
             if (is_whitespace_sequence)
                 continue;
+
+            if (is_negative)
+                number = -number;
 
             log_fmt_msg(INFO, "Sent request: %li", number);
 
@@ -81,7 +85,12 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
             log_fmt_msg(INFO, "Got response: %li", response);
 
             number = 0;
+            is_negative = false;
             is_whitespace_sequence = true;
+        }
+        else if (c == '-' && !is_negative) {
+            is_negative = true;
+            is_whitespace_sequence = false;
         }
         else if (isdigit(c)) {
             number = number * 10 + c - '0';

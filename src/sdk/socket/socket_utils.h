@@ -14,7 +14,7 @@ int connect_to_socket(const char* socket_name, Error** error);
 
 void send_string(int socket_fd, const char* str, Error** error);
 
-char* recv_line(int socket_fd, char* buffer, int char_count, Error** error);
+char* recv_line(int socket_fd, char* buffer, int buffer_length, Error** error);
 
 
 #endif
