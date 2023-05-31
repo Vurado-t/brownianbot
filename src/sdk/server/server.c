@@ -4,13 +4,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <fcntl.h>
-#include <sys/un.h>
 #include "server.h"
 #include "../log/log.h"
 #include "../socket/socket_utils.h"
 #include <stdlib.h>
 #include <ctype.h>
-#include <errno.h>
 
 /*
  * Returns connections->length if there is no inactive connections
@@ -179,13 +177,19 @@ void handle_receiving(ServerState* server_state, ConnectionContext* connection, 
     if (*error != NULL)
         return;
 
-    log_fmt_msg(INFO, "[Request handling] Received %d from fd %d", request, connection->socket_fd);
+    log_fmt_msg(INFO, "[Client %d] [Request handling] Received %d", connection->socket_fd, request);
 
     server_state->counter += request;
-    log_fmt_msg(INFO, "[Request handling] Updated server counter %d", server_state->counter);
+    log_fmt_msg(INFO,
+                "[Client %d] [Request handling] Updated server counter %d",
+                connection->socket_fd,
+                server_state->counter);
 
     start_sending_response(connection, server_state->counter);
-    log_fmt_msg(INFO, "[Request handling] Started sending %d to fd %d", server_state->counter, connection->socket_fd);
+    log_fmt_msg(INFO,
+                "[Client %d] [Request handling] Started sending %d",
+                connection->socket_fd,
+                server_state->counter);
 }
 
 void handle_poll_events(ServerState* server_state) {
