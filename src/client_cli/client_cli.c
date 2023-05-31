@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+#include <unistd.h>
 #include "../sdk/config/config.h"
 #include "../sdk/log/log.h"
 #include "../sdk/socket/socket_utils.h"
@@ -49,12 +50,12 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
     statistics->summary_delay_ns = 0;
 
     int socket_fd = connect_to_socket(socket_name, error);
-    log_fmt_msg(INFO, "Connected");
-
     if (*error != NULL) {
         free(statistics);
         return NULL;
     }
+
+    log_fmt_msg(INFO, "Connected");
 
     long file_offset = 0;
     long number = 0;
@@ -103,6 +104,8 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
         }
     }
 
+    close(socket_fd);
+
     return statistics;
 }
 
@@ -123,7 +126,7 @@ int main(int argc, char** argv) {
     log_fmt_msg(INFO, "Config path: %s", config_path);
     log_fmt_msg(INFO, "Delay milliseconds: %li", delay_ms);
 
-    Error* error;
+    Error* error = NULL;
 
     char* socket_name = provide_socket_name(argv[1], &error);
     if (error != NULL) {

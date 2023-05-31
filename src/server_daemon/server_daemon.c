@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Error* error;
+    Error* error = NULL;
 
     setup_signal_handling();
 

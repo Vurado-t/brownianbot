@@ -10,6 +10,7 @@
 #include "../socket/socket_utils.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <errno.h>
 
 /*
  * Returns connections->length if there is no inactive connections
@@ -39,15 +40,25 @@ void start_receiving(ConnectionContext* connection) {
 }
 
 int try_accept_connection(ServerState* server_state) {
-    struct sockaddr_un addr;
+    Error* error = NULL;
+
     socklen_t socklen;
 
-    int fd = accept(server_state->socket_factory_fd, (struct sockaddr*)&addr, &socklen);
+    // setting of __addr will give an error (Invalid arguments)
+    int fd = accept(server_state->socket_factory_fd, NULL, &socklen);
     if (fd < 0) {
+        error = get_error_from_errno("try_accept_connection accept");
+        if (error->code != 11) // Not temporary unavailable
+            log_error(error);
+
+        free_error(error);
         return -1;
     }
 
     if (fcntl(fd, F_SETFL, (fcntl(fd, F_GETFL, 0) | O_NONBLOCK)) < 0) {
+        error = get_error_from_errno("try_accept_connection nonblock");
+        log_error(error);
+        free_error(error);
         close(fd);
         return -1;
     }
@@ -144,9 +155,6 @@ bool try_read(ConnectionContext* connection) {
 }
 
 void handle_sending(ConnectionContext* connection) {
-    if ((connection->poll_revents & POLLOUT) == 0)
-        return;
-
     int count = (int)send(connection->socket_fd, connection->send_buffer + connection->sent_count,
                      connection->response_length - connection->sent_count, 0);
 
@@ -181,7 +189,7 @@ void handle_receiving(ServerState* server_state, ConnectionContext* connection, 
 }
 
 void handle_poll_events(ServerState* server_state) {
-    Error* error;
+    Error* error = NULL;
 
     for (int i = 0; i < server_state->connections.length; i++) {
         ConnectionContext* connection = &server_state->connections.items[i];
@@ -226,6 +234,12 @@ void handle_poll_events(ServerState* server_state) {
             continue;
         }
 
+        disable_connection(connection, &error);
+        if (error != NULL) {
+            log_error(error);
+            free_error(error);
+        }
+
         log_fmt_msg(
                 ERROR,
                 "handle_poll_events poll_revents: '%d' fd: '%d'",
@@ -234,13 +248,20 @@ void handle_poll_events(ServerState* server_state) {
     }
 }
 
-void map_to_poll_fds(ArrayConnectionContext* connections, ArrayPollFd* poll_fds) {
+int map_to_poll_fds(ArrayConnectionContext* connections, ArrayPollFd* poll_fds) {
+    int active_connections_count = 0;
+
     for (int i = 0; i < connections->length; i++) {
         ConnectionContext* connection = &connections->items[i];
 
+        if (connection->state != DISABLED)
+            active_connections_count++;
+
         poll_fds->items[i].fd = connection->state == DISABLED ? -1 : connection->socket_fd;
-        poll_fds->items[i].events = POLLIN | POLLOUT;
+        poll_fds->items[i].events = POLLIN;
     }
+
+    return active_connections_count;
 }
 
 void map_revents(ArrayPollFd* poll_fds, ArrayConnectionContext* connections) {
@@ -274,14 +295,19 @@ void run(ServerState* server_state) {
     poll_fds.length = server_state->connections.length;
     poll_fds.items = calloc(poll_fds.length, sizeof(PollFd));
 
+    int prev_active_connections_count = 0;
     while (server_state->is_running) {
         int client_fd = try_accept_connection(server_state);
         if (client_fd >= 0)
             log_fmt_msg(INFO, "Accepted connection %d", client_fd);
 
-        map_to_poll_fds(&server_state->connections, &poll_fds);
+        int active_connections_count = map_to_poll_fds(&server_state->connections, &poll_fds);
+        if (prev_active_connections_count != active_connections_count) {
+            prev_active_connections_count = active_connections_count;
+            log_fmt_msg(INFO, "active_connections_count: %d", active_connections_count);
+        }
 
-        int ready_count = poll(poll_fds.items, poll_fds.length, 1000);
+        int ready_count = poll(poll_fds.items, poll_fds.length, 50);
         if (ready_count < 0) {
             Error* error = get_error_from_errno("poll error");
             log_error(error);

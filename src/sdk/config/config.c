@@ -4,6 +4,8 @@
 #include "../file/file_utils.h"
 
 char* provide_socket_name(const char* config_path, Error** error) {
+    *error = NULL;
+
     long buffer_length;
     char* config_bytes = read_from_path(config_path, &buffer_length, error);
     if (*error != NULL)
