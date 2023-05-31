@@ -164,7 +164,7 @@ void handle_sending(ConnectionContext* connection) {
     connection->sent_count += count;
 
     if (connection->sent_count == connection->response_length) {
-        log_fmt_msg(INFO, "Send completed for fd %d ", connection->socket_fd);
+        log_fmt_msg(INFO, "[Request handling] Send completed for fd %d ", connection->socket_fd);
         start_receiving(connection);
     }
 }
@@ -179,13 +179,13 @@ void handle_receiving(ServerState* server_state, ConnectionContext* connection, 
     if (*error != NULL)
         return;
 
-    log_fmt_msg(INFO, "Received %d from fd(%d)", request, connection->socket_fd);
+    log_fmt_msg(INFO, "[Request handling] Received %d from fd %d", request, connection->socket_fd);
 
     server_state->counter += request;
-    log_fmt_msg(INFO, "Updated server counter: %d", server_state->counter);
+    log_fmt_msg(INFO, "[Request handling] Updated server counter %d", server_state->counter);
 
     start_sending_response(connection, server_state->counter);
-    log_fmt_msg(INFO, "Started sending %d to fd %d", server_state->counter, connection->socket_fd);
+    log_fmt_msg(INFO, "[Request handling] Started sending %d to fd %d", server_state->counter, connection->socket_fd);
 }
 
 void handle_poll_events(ServerState* server_state) {
@@ -299,7 +299,7 @@ void run(ServerState* server_state) {
     while (server_state->is_running) {
         int client_fd = try_accept_connection(server_state);
         if (client_fd >= 0)
-            log_fmt_msg(INFO, "Accepted connection %d", client_fd);
+            log_fmt_msg(INFO, "Accepted connection fd %d  heap %p", client_fd, sbrk(0));
 
         int active_connections_count = map_to_poll_fds(&server_state->connections, &poll_fds);
         if (prev_active_connections_count != active_connections_count) {
@@ -307,7 +307,7 @@ void run(ServerState* server_state) {
             log_fmt_msg(INFO, "active_connections_count: %d", active_connections_count);
         }
 
-        int ready_count = poll(poll_fds.items, poll_fds.length, 50);
+        int ready_count = poll(poll_fds.items, poll_fds.length, 10);
         if (ready_count < 0) {
             Error* error = get_error_from_errno("poll error");
             log_error(error);

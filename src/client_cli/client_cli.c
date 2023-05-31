@@ -65,8 +65,10 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
 
     while ((c = (char)getc(stdin)) != EOF) {
         file_offset++;
-        if (file_offset % 256 == delay_index && statistics->summary_delay_ns < 1)
+        if (file_offset % 256 == delay_index && statistics->summary_delay_ns < 1) {
+            log_fmt_msg(INFO, "Start wait %li ns", delay_ns);
             statistics->summary_delay_ns += sleep_ns(delay_ns);
+        }
 
         if (c == '\n') {
             if (is_whitespace_sequence)
@@ -75,7 +77,7 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
             if (is_negative)
                 number = -number;
 
-            log_fmt_msg(INFO, "Sent request: %li", number);
+            log_fmt_msg(INFO, "[Request handling] Sent request: %li", number);
 
             long response = send_request(socket_fd, number, error);
             if (*error != NULL) {
@@ -83,7 +85,7 @@ ClientStatistics* run_client(const char* socket_name, Error** error, long delay_
                 return NULL;
             }
 
-            log_fmt_msg(INFO, "Got response: %li", response);
+            log_fmt_msg(INFO, "[Request handling] Got response: %li", response);
 
             number = 0;
             is_negative = false;
